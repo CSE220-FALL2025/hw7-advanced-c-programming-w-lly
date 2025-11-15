@@ -195,19 +195,19 @@ matrix_sf* create_matrix_sf(char name, const char *expr) {
     m->num_cols = num_cols;
 
     expr = after_num;
-    int num_count = 0;
-    while (*expr != '\0'){
+    unsigned int num_count = 0;
+    while (*expr != '\0' && num_count < num_rows * num_cols){
         // skip non digit characters like '[' or ']', keep only numbers and negative sign for strtol
-        while (!((*expr >= '0' && *expr <= '9') || *expr == '-')){
+        while (*expr && !((*expr >= '0' && *expr <= '9') || *expr == '-')){
             expr++;
         }
+        if (!*expr) break;
+        
         int num = (int) strtol(expr, &after_num, 10);
         if (expr == after_num) break; // if strtol didn't move pointer then no numbers found (for trailing whitespace)
         m->values[num_count++] = num;
         expr = after_num;
     }
-
-    // print_matrix_sf(m);
 
     return m;
 }
@@ -228,7 +228,7 @@ char* infix2postfix_sf(char *infix) {
     // find number of valid operators in infix string
     char *tmp = infix;
     while (*tmp){
-        while (!isspace(*tmp)) tmp++;   // skip spaces
+        while (isspace(*tmp)) tmp++;   // skip spaces
         if (*tmp) cnt++;
         tmp++;
     }
@@ -239,8 +239,10 @@ char* infix2postfix_sf(char *infix) {
 
     while (*infix){
         while (isspace(*infix)) infix++;    // skip spaces
+        if (*infix == '\0') continue;
 
         char c = *infix;
+        // printf("%c\n", c);
 
         if (isalpha(c)){    // matrices
             *curr++ = c;
@@ -251,7 +253,7 @@ char* infix2postfix_sf(char *infix) {
                 *curr++ = *popped;
                 free(popped);
             }
-            if (!stack->head) printf("error in infix string: missing '(' for a ')'\n");
+            if (!stack->head) fprintf(stderr, "error in infix string: missing '(' for a ')'\n");
             else {
                 char *popped = pop_stack(stack);
                 free(popped);
@@ -263,7 +265,7 @@ char* infix2postfix_sf(char *infix) {
             push_stack(stack, p);
         }
         else {  // handle operators
-            if (!operator_precedence(c)) printf("invalid operator\n");
+            if (!operator_precedence(c)) fprintf(stderr, "invalid operator- %c\n", c);
             while (stack->head && operator_precedence(c) <= operator_precedence(*(char*)peek_stack(stack))){    // if operator is less important than last operator
                 char *popped = pop_stack(stack);
                 *curr++ = *popped;
@@ -289,7 +291,8 @@ char* infix2postfix_sf(char *infix) {
 }
 
 matrix_sf* evaluate_expr_sf(char name, char *expr, bst_sf *root) {
-    char *postfix = infix2postfix_sf(expr);
+    char *postfix_original = infix2postfix_sf(expr);
+    char *postfix = postfix_original;
     Stack *stack = create_stack();
     while (*postfix){
         char c = *postfix;
@@ -335,6 +338,7 @@ matrix_sf* evaluate_expr_sf(char name, char *expr, bst_sf *root) {
 
     if (!m) fprintf(stderr, "invalid expression: did not produce result");
     free(stack);
+    free(postfix_original);
 
     return m;
 }
@@ -351,8 +355,42 @@ matrix_sf *execute_script_sf(char *filename) {
 
     size_t max_line_size = MAX_LINE_LEN; // defined in hw7.h
     char *line = NULL; 
-    // int line_count = 0;
-    while (getline(&line, &max_line_size, file) != -1){
+    int line_count = 0;
+    while ((line_count = getline(&line, &max_line_size, file)) != -1){
+        char *curr_line = line;
+        curr_line[line_count-1] = '\0';
+
+        while (isspace(*curr_line)) curr_line++;
+        if (!*curr_line) continue;
+
+        char name = *curr_line++;
+        matrix_sf *m;
+        curr_line = strchr(curr_line, '=');
+        if (!curr_line){
+            fprintf(stderr, "line with out '=' sign");
+            continue;
+        }
+        else curr_line++;
+
+        if (strchr(curr_line, '[')){ // if '[' detected then its not an expression and need to create matrix
+            m = create_matrix_sf(name, curr_line);
+        }
+        else {
+            m = evaluate_expr_sf(name, curr_line, bst);
+        }
+
+        bst = insert_bst_sf(m, bst);
+        last_matrix = m;
+    }
+
+    matrix_sf *result = copy_matrix(last_matrix->num_rows, last_matrix->num_cols, last_matrix->values);
+    result->name = last_matrix->name;
+
+    free(line);
+    fclose(file);
+    free_bst_sf(bst);
+    
+    return result;
 }
 
 // This is a utility function used during testing. Feel free to adapt the code to implement some of
